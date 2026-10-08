@@ -1,0 +1,322 @@
+-- ============================================
+--  MM2: ESP + LOCK AIM FORTE + GUN v2
+--  - Aim FORTE: trava a câmera no Murderer INSTANTÂNEO
+--    (só quando VISÍVEL — parede bloqueia)
+--  - GUN v2 (escolhe no Rayfield):
+--    • TELEPORT FLASH: 1 TP pra gun + 1 TP de volta (mega rápido)
+--    • BRING GUN: a gun VEM até você (teleport gun)
+--  - 11 mapas na lista de GunDrop
+-- ============================================
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local UserInputService  = game:GetService("UserInputService")
+
+local LP = Players.LocalPlayer
+while not LP do task.wait(0.5) LP = Players.LocalPlayer end
+
+local Rayfield
+pcall(function() Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))() end)
+if not Rayfield then
+    pcall(function() Rayfield = loadstring(game:HttpGet('https://raw.githubusercontent.com/shlexware/Rayfield/main/source'))() end)
+end
+if not Rayfield then warn("Rayfield falhou") return end
+
+-- ================= ESTADO =================
+local espAtivo = false
+local aimAtivo = false
+local modoGun = "TELEPORT FLASH"  -- "TELEPORT FLASH" | "BRING GUN"
+local Murder, Sheriff, Hero
+local roles
+
+-- ================= ESP =================
+local function IsAlive(Player)
+    if not roles then return false end
+    for i, v in pairs(roles) do
+        if Player.Name == i then
+            return not v.Killed and not v.Dead
+        end
+    end
+    return false
+end
+
+local function limparHighlights()
+    for _, v in pairs(Players:GetChildren()) do
+        if v.Character and v.Character:FindFirstChild("Highlight") then
+            v.Character.Highlight:Destroy()
+        end
+    end
+end
+
+local function CreateHighlight()
+    for _, v in pairs(Players:GetChildren()) do
+        if v ~= LP and v.Character and not v.Character:FindFirstChild("Highlight") then
+            Instance.new("Highlight", v.Character)
+        end
+    end
+end
+
+local function UpdateHighlights()
+    for _, v in pairs(Players:GetChildren()) do
+        if v ~= LP and v.Character then
+            local Highlight = v.Character:FindFirstChild("Highlight")
+            if Highlight then
+                if v.Name == Murder and IsAlive(v) then
+                    Highlight.FillColor = Color3.fromRGB(225, 0, 0)
+                elseif v.Name == Sheriff and IsAlive(v) then
+                    Highlight.FillColor = Color3.fromRGB(0, 0, 225)
+                elseif v.Name == Hero and IsAlive(v) then
+                    Highlight.FillColor = Color3.fromRGB(255, 250, 0)
+                else
+                    Highlight.FillColor = Color3.fromRGB(0, 225, 0)
+                end
+            end
+        end
+    end
+end
+
+-- ================= VISIBILIDADE (sem parede) =================
+local function estaVisivel(alvoChar)
+    local cam = workspace.CurrentCamera
+    local hrp = alvoChar and alvoChar:FindFirstChild("HumanoidRootPart")
+    local head = alvoChar and alvoChar:FindFirstChild("Head")
+    if not hrp or not cam then return false end
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {LP.Character, alvoChar}
+
+    local origem = cam.CFrame.Position
+    local alvo = head and head.Position or hrp.Position
+    local resultado = workspace:Raycast(origem, alvo - origem, params)
+    return resultado == nil
+end
+
+-- ================= LOCK AIM FORTE =================
+RunService.RenderStepped:Connect(function()
+    pcall(function()
+        local remoto = ReplicatedStorage:FindFirstChild("GetPlayerData", true)
+        if remoto then roles = remoto:InvokeServer() end
+    end)
+    if roles then
+        for i, v in pairs(roles) do
+            if v.Role == "Murderer" then Murder = i
+            elseif v.Role == "Sheriff" then Sheriff = i
+            elseif v.Role == "Hero" then Hero = i
+            end
+        end
+    end
+
+    if espAtivo then
+        CreateHighlight()
+        UpdateHighlights()
+    end
+
+    if aimAtivo and Murder then
+        local alvo = Players:FindFirstChild(Murder)
+        if alvo and alvo.Character and alvo.Character:FindFirstChild("HumanoidRootPart")
+        and IsAlive(alvo) and estaVisivel(alvo.Character) then
+            local cam = workspace.CurrentCamera
+            local pos = alvo.Character.HumanoidRootPart.Position
+            cam.CFrame = CFrame.lookAt(cam.CFrame.Position, pos)
+        end
+    end
+end)
+
+-- ================= GUN: 11 MAPAS =================
+local listaGuns = {
+    "Hotel", "House2", "Workplace", "Hospital3", "Bank2",
+    "BioLab", "Mansion2", "ResearchFacility", "MilBase",
+    "Factory", "PoliceStation",
+}
+
+local function acharGunDrop()
+    for _, mapa in ipairs(listaGuns) do
+        local m = workspace:FindFirstChild(mapa)
+        if m then
+            local gun = m:FindFirstChild("GunDrop")
+            if gun then
+                return gun, mapa
+            end
+        end
+    end
+    return nil, nil
+end
+
+-- ================= GUN v2: EXECUÇÃO =================
+local function executarGun()
+    local gunDrop, mapaAchado = acharGunDrop()
+    local char = LP.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+    if not gunDrop or not hrp then
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "Gun v2"; Text = "GunDrop não achado em nenhum mapa!"; Duration = 3 })
+        return
+    end
+
+    local posicaoOriginal = hrp.CFrame
+    local destino = gunDrop.CFrame + Vector3.new(0, 3, 0)
+
+    if modoGun == "TELEPORT FLASH" then
+        -- ===== 1 TP PRA GUN + 1 TP DE VOLTA (mega rápido, sem passos) =====
+        task.spawn(function()
+            hrp.CFrame = destino                    -- 1º TP: vai pra gun
+            task.wait(0.25)                          -- 0.25s segurando (pega a gun)
+            hrp.CFrame = posicaoOriginal             -- 2º TP: volta pra posição
+            game:GetService("StarterGui"):SetCore("SendNotification", {
+                Title = "Teleport Flash"; Text = "Gun ("..(mapaAchado or "?")..") pegada e voltou!"; Duration = 3 })
+        end)
+
+    elseif modoGun == "BRING GUN" then
+        -- ===== A GUN VEM ATÉ VOCÊ (teleport gun) =====
+        task.spawn(function()
+            local meuChar = LP.Character
+            local meuHRP = meuChar and meuChar:FindFirstChild("HumanoidRootPart")
+            if not meuHRP then return end
+
+            -- teleporta a gun pra cima de você
+            gunDrop.CFrame = meuHRP.CFrame * CFrame.new(0, 2, -3)
+
+            -- força o toque da gun em você (pega garantido)
+            task.spawn(function()
+                for i = 1, 10 do
+                    pcall(function()
+                        firetouchinterest(meuHRP, gunDrop, 0)
+                        firetouchinterest(meuHRP, gunDrop, 1)
+                    end)
+                    task.wait(0.05)
+                end
+            end)
+
+            game:GetService("StarterGui"):SetCore("SendNotification", {
+                Title = "Bring Gun"; Text = "Gun ("..(mapaAchado or "?")..") trouxe até você!"; Duration = 3 })
+        end)
+    end
+end
+
+-- ================= GUI RAYFIELD =================
+local Window = Rayfield:CreateWindow({
+    Name = "MM2 Aim + ESP v2",
+    LoadingTitle = "MM2 v2",
+    LoadingSubtitle = "Aim FORTE + ESP + GUN",
+})
+local Tab = Window:CreateTab("MM2", 4483362458)
+
+Tab:CreateToggle({
+    Name = "ESP ATIVO",
+    CurrentValue = false,
+    Flag = "ESP",
+    Callback = function(v)
+        espAtivo = v
+        if not v then limparHighlights() end
+    end,
+})
+
+Tab:CreateParagraph({
+    Title = "Lock Aim FORTE",
+    Content = "Trava a câmera no MURDERER INSTANTÂNEO (0% suave).\nSó quando ele está VISÍVEL (parede bloqueia).\nAtiva pelo botão flutuante AIM!",
+})
+
+-- ===== LISTA DE MODOS DA GUN =====
+Tab:CreateDropdown({
+    Name = "Modo da GUN (escolhe antes de apertar o botão)",
+    Options = {"TELEPORT FLASH", "BRING GUN"},
+    CurrentOption = {"TELEPORT FLASH"},
+    Flag = "ModoGun",
+    Callback = function(opcao)
+        modoGun = opcao[1] or opcao
+        Rayfield:Notify({
+            Title = "Gun v2";
+            Content = "Modo: " .. tostring(modoGun);
+            Duration = 3 })
+    end,
+})
+
+Tab:CreateParagraph({
+    Title = "Gun v2 — Modos",
+    Content = "TELEPORT FLASH: 1 TP pra gun + 1 TP de volta (mega rápido, ~0.25s no total).\nBRING GUN: a gun vem até VOCÊ (teleport gun + toque forçado).\nFunciona nos 11 mapas automaticamente!",
+})
+
+-- ================= BOTÕES FLUTUANTES =================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "MM2Gui"
+ScreenGui.ResetOnSpawn = false
+local okGui = pcall(function() ScreenGui.Parent = game:GetService("CoreGui") end)
+if not okGui or not ScreenGui.Parent then
+    ScreenGui.Parent = LP:WaitForChild("PlayerGui")
+end
+
+-- ===== BOTÃO LOCK AIM (pequeno, arrastável) =====
+local btnAim = Instance.new("TextButton")
+btnAim.Name = "BtnAim"
+btnAim.Size = UDim2.new(0, 70, 0, 40)
+btnAim.Position = UDim2.new(0, 20, 0.7, 0)
+btnAim.BackgroundColor3 = Color3.fromRGB(60, 60, 200)
+btnAim.Text = "AIM"
+btnAim.TextSize = 15
+btnAim.Font = Enum.Font.GothamBold
+btnAim.TextColor3 = Color3.new(1, 1, 1)
+btnAim.Parent = ScreenGui
+Instance.new("UICorner", btnAim).CornerRadius = UDim.new(0, 10)
+
+local dragging, ds, sp
+btnAim.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        dragging, ds, sp = true, i.Position, btnAim.Position
+    end
+end)
+btnAim.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+        local d = i.Position - ds
+        btnAim.Position = UDim2.new(sp.X.Scale, sp.X.Offset + d.X, sp.Y.Scale, sp.Y.Offset + d.Y)
+    end
+end)
+
+local posC
+btnAim.MouseButton1Down:Connect(function() posC = btnAim.Position end)
+btnAim.MouseButton1Up:Connect(function()
+    if btnAim.Position == posC then
+        aimAtivo = not aimAtivo
+        if aimAtivo then
+            btnAim.Text = "AIM ON"
+            btnAim.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
+        else
+            btnAim.Text = "AIM"
+            btnAim.BackgroundColor3 = Color3.fromRGB(60, 60, 200)
+        end
+    end
+end)
+
+-- ===== BOTÃO GUN (executa o modo escolhido no Rayfield) =====
+local btnTP = Instance.new("TextButton")
+btnTP.Name = "BtnTP"
+btnTP.Size = UDim2.new(0, 110, 0, 45)
+btnTP.Position = UDim2.new(1, -130, 0.7, 0)
+btnTP.BackgroundColor3 = Color3.fromRGB(200, 120, 40)
+btnTP.Text = "GUN"
+btnTP.TextSize = 16
+btnTP.Font = Enum.Font.GothamBold
+btnTP.TextColor3 = Color3.new(1, 1, 1)
+btnTP.Parent = ScreenGui
+Instance.new("UICorner", btnTP).CornerRadius = UDim.new(0, 10)
+
+btnTP.MouseButton1Click:Connect(function()
+    btnTP.Text = "..."
+    executarGun()
+    task.delay(1, function() btnTP.Text = "GUN" end)
+end)
+
+Rayfield:Notify({
+    Title = "MM2 v2",
+    Content = "ESP + AIM FORTE + GUN v2 (FLASH / BRING). Pronto!",
+    Duration = 8,
+})
+
+print("[MM2 v2] Aim FORTE | GUN: TELEPORT FLASH (1 TP + volta) ou BRING GUN.")
